@@ -28,3 +28,5 @@ ___
 ![vmdl](img/vmdl.png)  
 右键点击需要添加的武器模型，选择Copy name  
 ![get_name](img/get_name.png)  
+打开scripts/weapons.vdata_c
+![vdata](img/vdata.png)
