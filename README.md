@@ -27,14 +27,14 @@ ___
 
 > 💡 **安装提示**：通常，你需要将这些依赖插件放入服务器的 `addons/` 或 `addons/counterstrikesharp/plugins/` 目录下，并确保它们在服务器启动时被加载。具体请参照各依赖项的官方文档。
 ___
-### 使用方法
-## 准备工作  
+## 使用方法
+### 准备工作  
 下载创意工坊资源包  
 下载[Source 2 Viewer](https://s2v.app)  
 找到创意工坊资源包目录，以下图为例  
 ![workshop](img/workshop.png)  
 其中3672657008是创意工坊id，找到steam安装目录steamapps/workshop/content/730/创意工坊id
-## 具体步骤
+### 具体步骤
 使用Source 2 Viewer打开创意工坊资源包(任意以.vpk结尾的文件)  
 ![3672657008](img/3672657008.png)  
 打开之后点击上方find  
@@ -53,7 +53,7 @@ ___
 ![vmdl2](img/vmdl2.png)  
 找到武器名称并复制(weapon_skin_001)  
 ![weapon_skin_001](img/weapon_skin_001.png)  
-## 配置文件编辑
+### 配置文件编辑
 ```
 {
   // 聊天消息前缀
