@@ -52,7 +52,7 @@ ___
     "Type": "CenterHtmlMenu",
     // 打开主菜单的指令列表
     // 玩家在控制台或聊天框输入这些指令即可打开菜单
-    "Command": [ "css_skin", "css_models" ],
+    "Command": [ "css_cw" ],
     // 打开主菜单所需的权限
     // 留空 [] 表示所有人都可以打开
     // 示例: ["@css/generic"] 表示需要通用管理员权限
@@ -75,14 +75,14 @@ ___
       // 注意：这通常取决于游戏逻辑，如果覆盖同一个武器槽位，通常只有最后一个生效
       "AllowMultiple": true,
       // 使用此分类下任何皮肤的权限要求
-      "Permission": [ "@css/generic" ],
+      "Permission": [],
       // 限制使用此分类的队伍
       "Team": "",
       // 皮肤/装备列表
       "Equipment": [
         {
           // 在菜单中显示的名称
-          "Name": "默认 M4A4",
+          "Name": "蓝色皮肤 AK47",
           // 使用该特定皮肤的权限
           // 会与分类权限叠加检查
           "Permission": [],
@@ -99,25 +99,13 @@ ___
           //    用于替换模型。该名称会被传递给服务器的 AcceptInput "ChangeSubclass" 指令。
           //    它必须是服务器已加载的资源名称。
           //    例如: weapon_ak47_gold (假设你有一个金色的AK模型)
-          "Weapon": "weapon_m4a1:weapon_m4a1"
+          "Weapon": "weapon_ak47:weapon_ak47_blue"
         },
         {
           "Name": "红色皮肤 AK47",
           "Permission": [ "@css/vip" ], // 例子：仅VIP可用
           "Team": "t",                  // 例子：仅T可用
           "Weapon": "weapon_ak47:weapon_ak47_red"
-        },
-        {
-          "Name": "蓝色皮肤 AK47",
-          "Permission": [],
-          "Team": "ct",                 // 例子：仅CT可用
-          "Weapon": "weapon_ak47:weapon_ak47_blue"
-        },
-        {
-          "Name": "黄金匕首",
-          "Permission": [],
-          "Team": "",
-          "Weapon": "weapon_knife:weapon_knife_gold"
         }
       ]
     }
