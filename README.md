@@ -13,6 +13,10 @@ ___
 [CS2MenuManager](https://github.com/schwarper/CS2MenuManager)  
 ___
 ### 使用方法
-准备工作  
+## 准备工作  
 下载创意工坊资源包  
 下载[Source 2 Viewer](https://s2v.app)  
+找到创意工坊资源包目录
+
+## 具体步骤
+使用Source 2 Viewer打开创意工坊资源包(.vpk)
