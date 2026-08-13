@@ -39,7 +39,7 @@ ___
 找到武器名称并复制(weapon_skin_001)  
 ![weapon_skin_001](img/weapon_skin_001.png)  
 ## 配置文件编辑
-```json
+```
 {
   // 聊天消息前缀
   // 支持颜色代码，例如: {white}, {darkred}, {green}, {lightblue} 等
@@ -96,9 +96,7 @@ ___
           //    例如: weapon_ak47, weapon_knife, weapon_m4a1
           //
           // 2. 目标模型名 (冒号右边):
-          //    用于替换模型。该名称会被传递给服务器的 AcceptInput "ChangeSubclass" 指令。
-          //    它必须是服务器已加载的资源名称。
-          //    例如: weapon_ak47_gold (假设你有一个金色的AK模型)
+          //    用于替换模型，例如具体步骤里复制的weapon_skin_001
           "Weapon": "weapon_ak47:weapon_ak47_blue"
         },
         {
