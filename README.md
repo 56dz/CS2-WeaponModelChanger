@@ -5,3 +5,7 @@
 修复了更换模型后无法还原的BUG  
 修复了修改后重进失效的BUG  
 修复了选择后模型末尾出现menu的BUG  
+### 插件的依赖
+[MetaMod](https://www.sourcemm.net/downloads.php?branch=dev)
+[CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)
+[CS2MenuManager](https://github.com/schwarper/CS2MenuManager)
