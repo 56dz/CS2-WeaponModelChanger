@@ -34,3 +34,5 @@ ___
 ![find](img/find2.png)  
 输入刚才复制文件name  
 ![vmdl_c](img/vmdl_c.png)  
+删掉结尾的_c  
+![vmdl2](img/vmdl2.png)  
