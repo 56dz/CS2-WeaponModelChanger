@@ -53,7 +53,9 @@ ___
 ![vmdl2](img/vmdl2.png)  
 找到武器名称并复制(weapon_skin_001)  
 ![weapon_skin_001](img/weapon_skin_001.png)  
-打开服务端MultiAddonManager的配置文件，路径在game/csgo/cfg/multiaddonmanager/multiaddonmanager.cfg
+打开服务端MultiAddonManager的配置文件，路径在game/csgo/cfg/multiaddonmanager/multiaddonmanager.cfg  
+修改mm_extra_addons和mm_client_extra_addons为创意工坊id  
+![MultiAddonManager](img/MultiAddonManager.png)  
 ### 配置文件编辑
 ```
 {
