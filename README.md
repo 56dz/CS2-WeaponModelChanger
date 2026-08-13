@@ -9,5 +9,5 @@ ___
 ### 插件的依赖
 [MetaMod](https://www.sourcemm.net/downloads.php?branch=dev)  
 [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)  
-[CS2MenuManager](https://github.com/schwarper/CS2MenuManager)  
 [MultiAddonManager](https://github.com/Source2ZE/MultiAddonManager)  
+[CS2MenuManager](https://github.com/schwarper/CS2MenuManager)  
