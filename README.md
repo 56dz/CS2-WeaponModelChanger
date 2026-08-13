@@ -56,6 +56,7 @@ ___
 打开服务端MultiAddonManager的配置文件，路径在game/csgo/cfg/multiaddonmanager/multiaddonmanager.cfg  
 修改mm_extra_addons和mm_client_extra_addons为创意工坊id  
 ![MultiAddonManager](img/MultiAddonManager.png)  
+在启动CS2服务器后，输入mm_download_addon 创意工坊id 下载资源包  
 ### 配置文件编辑
 ```
 {
