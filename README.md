@@ -15,11 +15,17 @@ CS2-WeaponModelChanger 是一个基于 [equipments](https://github.com/exkludera
 - 使用任何修改游戏文件的插件都可能存在一定的VAC封禁风险，请在非正式环境中谨慎使用。
 - 作者不对使用本插件造成的任何后果负责。
 ___
-### 插件的依赖
-[MetaMod](https://www.sourcemm.net/downloads.php?branch=dev)  
-[CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)  
-[MultiAddonManager](https://github.com/Source2ZE/MultiAddonManager)  
-[CS2MenuManager](https://github.com/schwarper/CS2MenuManager)  
+### 插件依赖
+以下插件是运行本插件所必需的，请确保在安装本插件前已正确安装并配置它们。
+
+| 依赖项 | 最低版本要求 | 安装指南 | 说明 |
+| :--- | :--- | :--- | :--- |
+| **[MetaMod](https://www.sourcemm.net/downloads.php?branch=dev)** | 最新开发版 | [官方安装文档](https://wiki.alliedmods.net/Installing_Metamod:Source) | 服务器插件基础框架 |
+| **[CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)** | 最新版 | [官方安装文档](https://github.com/roflmuffin/CounterStrikeSharp#installation) | CS2 的 C# 插件核心 |
+| **[MultiAddonManager](https://github.com/Source2ZE/MultiAddonManager)** | 最新版 | [项目Readme](https://github.com/Source2ZE/MultiAddonManager) | 管理服务器创意工坊资源包 |
+| **[CS2MenuManager](https://github.com/schwarper/CS2MenuManager)** | 最新版 | [项目Readme](https://github.com/schwarper/CS2MenuManager) | 提供菜单系统支持 |
+
+> 💡 **安装提示**：通常，你需要将这些依赖插件放入服务器的 `addons/` 或 `addons/counterstrikesharp/plugins/` 目录下，并确保它们在服务器启动时被加载。具体请参照各依赖项的官方文档。
 ___
 ### 使用方法
 ## 准备工作  
