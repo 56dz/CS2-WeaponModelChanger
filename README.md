@@ -16,7 +16,7 @@ ___
 ## 准备工作  
 下载创意工坊资源包  
 下载[Source 2 Viewer](https://s2v.app)  
-找到创意工坊资源包目录
+找到创意工坊资源包目录，以下图为例  
 ![workshop](img/workshop.png)
 ## 具体步骤
 使用Source 2 Viewer打开创意工坊资源包(.vpk)
