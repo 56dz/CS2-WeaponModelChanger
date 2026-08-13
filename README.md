@@ -21,4 +21,6 @@ ___
 其中3672657008是创意工坊id，找到steam安装目录steamapps/workshop/content/730/创意工坊id
 ## 具体步骤
 使用Source 2 Viewer打开创意工坊资源包(任意以.vpk结尾的文件)  
-![3672657008](img/3672657008.png)
+![3672657008](img/3672657008.png)  
+打开之后点击上方find  
+![find](img/find.png)  
