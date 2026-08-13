@@ -36,3 +36,5 @@ ___
 ![vmdl_c](img/vmdl_c.png)  
 删掉结尾的_c  
 ![vmdl2](img/vmdl2.png)  
+找到武器名称  
+![weapon_skin_001](img/weapon_skin_001.png)  
