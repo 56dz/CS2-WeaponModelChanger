@@ -26,5 +26,5 @@ ___
 ![find](img/find.png)  
 查询vmdl  
 ![vmdl](img/vmdl.png)  
-右键点击需要添加的武器模型  
+右键点击需要添加的武器模型，选择Copy name  
 ![get_name](img/get_name.png)  
