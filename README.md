@@ -1,10 +1,19 @@
 # CS2-WeaponModelChanger
-### 此插件是在插件[equipments](https://github.com/exkludera-cssharp/equipments)基础上进行修改  
-属于Equipments的精简修复版
-移除了对[Clientprefs](https://github.com/Cruze03/Clientprefs)的依赖  
-修复了更换模型后无法还原的BUG  
-修复了修改后重进失效的BUG  
-修复了选择后模型末尾出现menu的BUG  
+### 插件简介
+CS2-WeaponModelChanger 是一个基于 [equipments](https://github.com/exkludera-cssharp/equipments) 插件的精简修复版，专门用于 Counter-Strike 2 (CS2) 服务器的武器模型替换。
+
+**主要特点与修复**：
+- 🚫 **移除依赖**：不再需要 [Clientprefs](https://github.com/Cruze03/Clientprefs) 插件
+- 🐛 **Bug修复**：修复了更换模型后无法还原、修改后重进失效、模型名称末尾出现 "menu" 等问题
+- ⚙️ **精简优化**：在保留核心功能的前提下优化了代码结构和性能
+
+**功能说明**：
+此插件允许玩家通过菜单或指令选择不同的武器模型（皮肤），并支持权限和队伍限制。模型替换基于服务端配置，无需客户端安装任何文件。
+
+**⚠️ 重要提示**：
+- 本插件仅供学习和测试使用。
+- 使用任何修改游戏文件的插件都可能存在一定的VAC封禁风险，请在非正式环境中谨慎使用。
+- 作者不对使用本插件造成的任何后果负责。
 ___
 ### 插件的依赖
 [MetaMod](https://www.sourcemm.net/downloads.php?branch=dev)  
