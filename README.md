@@ -18,6 +18,6 @@ ___
 下载[Source 2 Viewer](https://s2v.app)  
 找到创意工坊资源包目录，以下图为例  
 ![workshop](img/workshop.png)  
-其中3672657008是创意工坊id，找到目录steamapps/workshop/content/730/创意工坊id
+其中3672657008是创意工坊id，找到steam安装目录steamapps/workshop/content/730/创意工坊id
 ## 具体步骤
-使用Source 2 Viewer打开创意工坊资源包(.vpk)
+使用Source 2 Viewer打开创意工坊资源包(任意以.vpk结尾的文件)
