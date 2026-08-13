@@ -30,3 +30,5 @@ ___
 ![get_name](img/get_name.png)  
 打开scripts/weapons.vdata_c  
 ![vdata](img/vdata.png)  
+再次点击find  
+![find](img/find2.png)  
