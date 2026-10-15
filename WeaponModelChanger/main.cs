@@ -1,44 +1,85 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Translations;
+using Microsoft.Extensions.Logging;
 
 public partial class Plugin : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "WeaponModelChanger";
-    public override string ModuleVersion => "1.0.0";
+    public override string ModuleVersion => "2.0.0";
     public override string ModuleAuthor => "56dz";
+
     public static Plugin Instance { get; set; } = new();
+
+    public Config Config { get; set; } = new();
+
+    /// <summary>Debug=false（默认）时只输出错误，不输出逐次流程日志。</summary>
+    internal bool DebugEnabled => Config.Debug;
 
     public override void Load(bool hotReload)
     {
         Instance = this;
-        Database.Initialize();
-        Events.Register();
-        Commands.Register();
 
-        if (hotReload)
+        try
         {
-            Server.NextWorldUpdate(() =>
+            // 1) 数据库：绝对路径 + 旧库自动迁移（绝不依赖进程 cwd）
+            Database.Initialize();
+
+            // 2) 事件与命令
+            Events.Register();
+            Commands.Register();
+
+            // 3) 热重载：把已经在线的玩家补一遍
+            if (hotReload)
             {
-                foreach (var player in Utilities.GetPlayers().Where(p => p.IsValid && !p.IsBot && p.SteamID != 0))
+                Server.NextWorldUpdate(() =>
                 {
-                    Events.OnPlayerSpawnInternal(player);
-                }
-            });
+                    try
+                    {
+                        foreach (var player in Utilities.GetPlayers())
+                        {
+                            if (!Players.IsHuman(player)) continue;
+                            Database.LoadPlayerSkins(player.SteamID);
+                            Weapons.ScheduleApply(player, 0.5f);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"[Load] 热重载恢复异常 {ex.GetType().Name}: {ex.Message}");
+                    }
+                });
+            }
         }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Load] 初始化异常 {ex.GetType().Name}: {ex.Message}");
+        }
+
+        Logger.LogInformation($"[Load] v{ModuleVersion} hotReload={hotReload} Debug={Config.Debug} " +
+                              $"菜单类型={Config.Menu.MenuType} 分类数={Config.Categories.Count} " +
+                              $"皮肤条目={Utils.CountEquipments(Config)} 数据库={Database.DbPath}");
     }
 
     public override void Unload(bool hotReload)
     {
-        Events.Unregister();
-        Commands.Unregister();
+        try
+        {
+            Events.Unregister();
+            Commands.Unregister();
+            Weapons.ClearState();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Unload] 异常 {ex.GetType().Name}: {ex.Message}");
+        }
     }
-
-    public Config Config { get; set; } = new();
 
     public void OnConfigParsed(Config config)
     {
         Config = config;
         Config.Prefix = StringExtensions.ReplaceColorTags(Config.Prefix);
+
+        Config.Menu ??= new Config.Config_Menu();
+        Config.Categories ??= new Dictionary<string, MenuCategory>();
     }
 }

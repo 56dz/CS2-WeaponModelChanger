@@ -1,113 +1,223 @@
 using CounterStrikeSharp.API.Core;
-using CounterStrikeSharp.API.Modules.Commands;
 using CS2MenuManager.API.Class;
 using CS2MenuManager.API.Interface;
-using System.Linq;
+using CS2MenuManager.API.Menu;
 
+/// <summary>
+/// WASD 菜单（CS2MenuManager 1.0.43）。
+///
+/// 结构：主菜单（该玩家有权限的武器列表） -> 子菜单（该武器的皮肤列表 + 默认模型）。
+/// WASD/滚轮选择，E（或配置的键）确认，Q/退出键返回/关闭。
+/// </summary>
 public static class Menu
 {
-    private static readonly Plugin Instance = Plugin.Instance;
+    private static Plugin Instance => Plugin.Instance;
 
-    [CommandHelper(minArgs: 0, whoCanExecute: CommandUsage.CLIENT_ONLY)]
-    public static void Open(CCSPlayerController? player, CommandInfo info)
+    /// <summary>按配置创建菜单。类型名来自 config 的 Menu.MenuType（默认 WasdMenu）。</summary>
+    private static IMenu CreateMenu(string title)
     {
-        if (player == null) return;
-        if (!Utils.HasPermission(player, Instance.Config.Menu.Permission, Instance.Config.Menu.Team))
+        var type = Instance.Config.Menu.ResolveMenuType();
+
+        return type.ToLowerInvariant() switch
         {
-            player.PrintToChat(Instance.Config.Prefix + Instance.Localizer["chat<nopermission>"]);
-            return;
-        }
-        Database.LoadPlayerSkins(player.SteamID);
-        MainMenu(player).Display(player, 0);
+            "chatmenu" => new ChatMenu(title, Instance),
+            "centerhtmlmenu" => new CenterHtmlMenu(title, Instance),
+            "consolemenu" => new ConsoleMenu(title, Instance),
+            _ => new WasdMenu(title, Instance),
+        };
     }
 
-    public static IMenu MainMenu(CCSPlayerController player)
+    /// <summary>打开主菜单（!cw / css_cw）。</summary>
+    public static void Open(CCSPlayerController? player)
     {
-        IMenu mainMenu = MenuManager.MenuByType(Instance.Config.Menu.Type, "武器皮肤菜单", Instance);
-        var weaponBases = Utils.GetAllWeaponBases();
-
-        foreach (var weaponBase in weaponBases)
+        try
         {
-            var equipments = Utils.GetEquipmentsByWeaponBase(weaponBase).ToList();
-            if (equipments.Count == 0) continue;
+            if (!Players.IsHuman(player)) return;
 
-            bool hasAnyPermission = false;
-            foreach (var eq in equipments)
+            var controller = player!;
+
+            if (!Utils.HasPermission(controller, Instance.Config.Menu.Permission, Instance.Config.Menu.Team))
             {
-                var category = Utils.FindCategoryByEquipment(eq);
-                if (category != null && Utils.HasPermission(player, category.Permission, category.Team.ToLower()))
+                Print(controller, Instance.Localizer["chat<nopermission>"]);
+                return;
+            }
+
+            Database.LoadPlayerSkins(controller.SteamID);
+
+            var menu = BuildMainMenu(controller);
+            menu.Display(controller, 0);
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Menu] 打开菜单异常 {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static IMenu BuildMainMenu(CCSPlayerController player)
+    {
+        var menu = CreateMenu("武器皮肤菜单");
+
+        try
+        {
+            ConfigureWasdMenu(menu);
+
+            // 按武器归组（保持配置文件里的出现顺序）
+            var grouped = new List<(string WeaponBase, List<Equipment> Items)>();
+
+            foreach (var equipment in Utils.EnumerateEquipments())
+            {
+                var spec = Utils.ParseSpec(equipment.Weapon);
+                if (spec == null) continue;
+
+                var category = Utils.FindCategory(equipment);
+                if (category == null) continue;
+
+                // 分类权限 + 具体条目权限/队伍，双重过滤
+                if (!Utils.HasPermission(player, category.Permission, category.Team)) continue;
+                if (!Utils.HasPermission(player, equipment.Permission, equipment.Team)) continue;
+
+                var weaponBase = spec.Value.WeaponBase;
+                var slot = grouped.FirstOrDefault(g => g.WeaponBase == weaponBase);
+                if (slot.Items == null)
                 {
-                    hasAnyPermission = true;
-                    break;
+                    slot = (weaponBase, new List<Equipment>());
+                    grouped.Add(slot);
                 }
+
+                slot.Items.Add(equipment);
             }
 
-            if (!hasAnyPermission) continue;
-
-            var firstCategory = Utils.FindCategoryByEquipment(equipments.First());
-            string displayName = Utils.GetWeaponDisplayName(weaponBase);
-
-            bool hasSkin = Database.PlayerSkinCache.TryGetValue(player.SteamID, out var skins) &&
-                           skins.ContainsKey(weaponBase) &&
-                           !string.IsNullOrEmpty(skins[weaponBase]);
-
-            if (hasSkin) displayName += " [已启用]";
-
-            mainMenu.AddItem(displayName, (p, menuOption) =>
+            if (grouped.Count == 0)
             {
-                if (firstCategory != null) SubMenu(p, weaponBase, firstCategory, mainMenu);
-            });
+                menu.AddItem("没有可用皮肤", (_, _) => { });
+                return menu;
+            }
+
+            Database.PlayerSkinCache.TryGetValue(player.SteamID, out var skins);
+
+            foreach (var (weaponBase, items) in grouped)
+            {
+                var displayName = Utils.GetWeaponDisplayName(weaponBase);
+
+                var current = skins != null && skins.TryGetValue(weaponBase, out var skin) && !string.IsNullOrWhiteSpace(skin)
+                    ? items.FirstOrDefault(e => Utils.ParseSpec(e.Weapon)?.Subclass == skin)?.Name
+                    : null;
+
+                var title = current != null ? $"{displayName} [{current}]" : displayName;
+
+                var localItems = items;
+                menu.AddItem(title, (p, _) => OpenSubMenu(p, weaponBase, localItems));
+            }
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Menu] 构建主菜单异常 {ex.GetType().Name}: {ex.Message}");
         }
 
-        return mainMenu;
+        return menu;
     }
 
-    public static void SubMenu(CCSPlayerController player, string weaponBase, MenuCategory category, IMenu? prevMenu)
+    private static void OpenSubMenu(CCSPlayerController player, string weaponBase, List<Equipment> items)
     {
-        IMenu subMenu = MenuManager.MenuByType(Instance.Config.Menu.Type, $"选择 {Utils.GetWeaponDisplayName(weaponBase)} 皮肤", Instance);
-        var equipments = Utils.GetEquipmentsByWeaponBase(weaponBase).ToList();
-
-        bool isDefault = true;
-        Dictionary<string, string>? skins = null;
-        if (Database.PlayerSkinCache.TryGetValue(player.SteamID, out skins) && skins.ContainsKey(weaponBase))
+        try
         {
-            isDefault = false;
-        }
+            if (!Players.IsHuman(player)) return;
 
-        string defaultTitle = "默认模型";
-        if (isDefault) defaultTitle += " (当前选择)";
+            var menu = CreateMenu($"{Utils.GetWeaponDisplayName(weaponBase)} 皮肤");
+            ConfigureWasdMenu(menu);
 
-        subMenu.AddItem(defaultTitle, (p, mo) =>
-        {
-            Database.RemovePlayerSkin(p.SteamID, weaponBase);
-            Weapons.Unequip(p, $"{weaponBase}:{weaponBase}");
-            SubMenu(p, weaponBase, category, prevMenu);
-        });
+            Database.PlayerSkinCache.TryGetValue(player.SteamID, out var skins);
+            var currentSkin = skins != null && skins.TryGetValue(weaponBase, out var skin) ? skin : null;
 
-        foreach (var equipment in equipments)
-        {
-            if (!Utils.HasPermission(player, equipment.Permission, equipment.Team)) continue;
+            // 必须闭包捕获新变量，避免循环变量共享
+            var localWeaponBase = weaponBase;
 
-            var parts = equipment.Weapon.Split(':');
-            if (parts.Length < 2) continue;
-
-            var skinId = parts[1];
-            string itemTitle = equipment.Name;
-
-            if (skins != null && skins.TryGetValue(weaponBase, out var activeSkin) && activeSkin == skinId)
+            // 1) 还原选项
+            menu.AddItem(currentSkin == null ? "默认模型（当前）" : "默认模型", (p, _) =>
             {
-                itemTitle += " (当前选择)";
+                try
+                {
+                    if (!Players.IsHuman(p)) return;
+
+                    var controller = p!;
+                    Database.RemovePlayerSkin(controller.SteamID, localWeaponBase);
+                    Weapons.RestoreToVanilla(controller, localWeaponBase);
+                    Print(controller, $"已还原 {Utils.GetWeaponDisplayName(localWeaponBase)} 的默认模型");
+                }
+                catch (Exception ex)
+                {
+                    Utils.LogError($"[Menu] 还原异常 {ex.GetType().Name}: {ex.Message}");
+                }
+            });
+
+            // 2) 皮肤选项
+            foreach (var item in items)
+            {
+                var spec = Utils.ParseSpec(item.Weapon);
+                if (spec == null) continue;
+
+                var localSpec = spec.Value;
+                var localItem = item;
+                var isCurrent = currentSkin != null &&
+                                string.Equals(currentSkin, localSpec.Subclass, StringComparison.Ordinal);
+
+                var title = isCurrent ? $"{localItem.Name}（当前）" : localItem.Name;
+
+                menu.AddItem(title, (p, _) =>
+                {
+                    try
+                    {
+                        if (!Players.IsHuman(p)) return;
+
+                        var controller = p!;
+
+                        // 选择即持久化
+                        Database.SetPlayerSkin(controller.SteamID, localSpec.WeaponBase, localSpec.Subclass);
+
+                        // 手里有这把武器就立刻换，否则出生/拾取时会自动补上
+                        Weapons.ApplyToHeldWeapon(controller, localSpec.WeaponBase, localSpec.Subclass);
+
+                        Print(p, $"已选择 {localItem.Name}（{Utils.GetWeaponDisplayName(localSpec.WeaponBase)}）");
+                    }
+                    catch (Exception ex)
+                    {
+                        Utils.LogError($"[Menu] 选择皮肤异常 {ex.GetType().Name}: {ex.Message}");
+                    }
+                });
             }
 
-            subMenu.AddItem(itemTitle, (p, mo) =>
-            {
-                Database.SetPlayerSkin(p.SteamID, weaponBase, skinId);
-                Weapons.Equip(p, equipment.Weapon);
-                SubMenu(p, weaponBase, category, prevMenu);
-            });
+            menu.Display(player, 0);
         }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Menu] 打开子菜单异常 {ex.GetType().Name}: {ex.Message}");
+        }
+    }
 
-        subMenu.PrevMenu = prevMenu;
-        subMenu.Display(player, 0);
+    private static void ConfigureWasdMenu(IMenu menu)
+    {
+        try
+        {
+            if (menu is not BaseMenu baseMenu) return;
+
+            baseMenu.WasdMenu_FreezePlayer = Instance.Config.Menu.FreezePlayer;
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Menu] 配置 WASD 菜单异常 {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void Print(CCSPlayerController player, string message)
+    {
+        try
+        {
+            if (player == null || !player.IsValid) return;
+            player.PrintToChat($"{Instance.Config.Prefix} {message}");
+        }
+        catch
+        {
+            // ignored
+        }
     }
 }
