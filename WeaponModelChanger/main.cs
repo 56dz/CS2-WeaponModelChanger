@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 public partial class Plugin : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "WeaponModelChanger";
-    public override string ModuleVersion => "2.0.0";
+    public override string ModuleVersion => "2.0.1";
     public override string ModuleAuthor => "56dz";
 
     public static Plugin Instance { get; set; } = new();
@@ -57,7 +57,8 @@ public partial class Plugin : BasePlugin, IPluginConfig<Config>
 
         Logger.LogInformation($"[Load] v{ModuleVersion} hotReload={hotReload} Debug={Config.Debug} " +
                               $"菜单类型={Config.Menu.MenuType} 分类数={Config.Categories.Count} " +
-                              $"皮肤条目={Utils.CountEquipments(Config)} 数据库={Database.DbPath}");
+                              $"皮肤条目={Utils.CountEquipments(Config)} 默认子类={Utils.DefaultSubclasses.Count} " +
+                              $"资源模型={SkinModelPaths.ModelPathCount} 数据库={Database.DbPath}");
     }
 
     public override void Unload(bool hotReload)
@@ -81,5 +82,14 @@ public partial class Plugin : BasePlugin, IPluginConfig<Config>
 
         Config.Menu ??= new Config.Config_Menu();
         Config.Categories ??= new Dictionary<string, MenuCategory>();
+        Config.DefaultSubclasses ??= new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // 功能3：构建"未选皮肤时的默认子类"映射（条目级覆盖顶层）
+        var defaultCount = Utils.RebuildDefaultSubclasses(Config);
+        if (defaultCount > 0)
+        {
+            foreach (var kv in Utils.DefaultSubclasses)
+                Utils.Debug($"[Config] 默认子类 {kv.Key} -> {kv.Value}");
+        }
     }
 }

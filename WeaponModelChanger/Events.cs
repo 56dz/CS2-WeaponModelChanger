@@ -15,6 +15,8 @@ public static class Events
             Instance.RegisterEventHandler<EventRoundStart>(OnRoundStart);
             Instance.RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
             Instance.RegisterListener<Listeners.OnMapStart>(OnMapStart);
+            // 功能1：服务端资源清单登记（1.x/2.0.0 一直空着的钩子，皮肤模型从未进清单）
+            Instance.RegisterListener<Listeners.OnServerPrecacheResources>(OnServerPrecacheResources);
         }
         catch (Exception ex)
         {
@@ -31,6 +33,7 @@ public static class Events
             Instance.DeregisterEventHandler<EventRoundStart>(OnRoundStart);
             Instance.DeregisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
             Instance.RemoveListener<Listeners.OnMapStart>(OnMapStart);
+            Instance.RemoveListener<Listeners.OnServerPrecacheResources>(OnServerPrecacheResources);
         }
         catch (Exception ex)
         {
@@ -49,6 +52,55 @@ public static class Events
         catch (Exception ex)
         {
             Utils.LogError($"[Events] OnMapStart 异常 {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 功能1：服务端资源清单登记（地图加载/服务端首次启动时触发）。
+    ///
+    /// 背景：客户端 console.log 实测报
+    /// "RESOURCE_TYPE_MODEL resource ... requested but not resident (Missing from a manifest?)"
+    /// —— 皮肤模型在两边 VPK 里都完整存在，但从未被登记进服务端资源清单。
+    /// 1.x 沿袭下来的这个钩子一直是**空函数**，这里补上真正的登记逻辑。
+    ///
+    /// 路径格式：与 vdata 的 m_szWorldModel 完全一致 —— 带 .vmdl 扩展名、不带 _c
+    /// （实测 resourceinfo 依赖项即显示为 weapons/models/glock_doro/glock_doro.vmdl）。
+    /// </summary>
+    private static void OnServerPrecacheResources(ResourceManifest? manifest)
+    {
+        var ok = 0;
+        var failed = 0;
+
+        try
+        {
+            if (manifest == null)
+            {
+                Utils.LogError("[Precache] manifest 为空，跳过资源登记");
+                return;
+            }
+
+            foreach (var path in SkinModelPaths.AllModelPaths)
+            {
+                try
+                {
+                    manifest.AddResource(path);
+                    ok++;
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Utils.LogError($"[Precache] 登记资源失败 {path} {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            if (failed > 0)
+                Utils.LogError($"[Precache] 资源清单登记完成：成功 {ok} 条，失败 {failed} 条（共 {SkinModelPaths.ModelPathCount} 条去重模型）");
+            else
+                Utils.Debug($"[Precache] 已向服务端资源清单登记皮肤模型 {ok} 条（{SkinModelPaths.SkinCount} 个皮肤 / {SkinModelPaths.ModelPathCount} 条去重路径）");
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Precache] OnServerPrecacheResources 异常 {ex.GetType().Name}: {ex.Message}");
         }
     }
 

@@ -76,7 +76,11 @@ public static class Weapons
         }
     }
 
-    /// <summary>把该玩家已保存的所有皮肤应用到其当前持有的武器上。</summary>
+    /// <summary>
+    /// 把该玩家已保存的所有皮肤应用到其当前持有的武器上。
+    /// 功能3：**没有**为某武器保存皮肤时，若配置了 DefaultSubclass（如 weapon_awp_10round），
+    /// 则对该武器应用默认子类；两者都没有则完全不动这把武器。
+    /// </summary>
     public static void ApplyAllWeapons(CCSPlayerController? player)
     {
         try
@@ -87,11 +91,10 @@ public static class Weapons
             var steamId = controller.SteamID;
             Database.LoadPlayerSkins(steamId);
 
-            if (!Database.PlayerSkinCache.TryGetValue(steamId, out var skins) || skins.Count == 0)
-            {
-                Utils.Debug($"[Weapons] 玩家 {controller.PlayerName} 没有已保存的皮肤");
-                return;
-            }
+            // 注意：这里不再因为"没有皮肤"提前返回 —— 没皮肤的武器仍要走默认子类
+            Database.PlayerSkinCache.TryGetValue(steamId, out var skins);
+            var skinCount = skins?.Count ?? 0;
+            Utils.Debug($"[Weapons] 玩家 {controller.PlayerName} 已保存皮肤 {skinCount} 条");
 
             foreach (var weapon in Players.GetWeapons(controller))
             {
@@ -99,9 +102,17 @@ public static class Weapons
                 {
                     var weaponBase = GetWeaponBaseName(weapon);
                     if (weaponBase == null) continue;
-                    if (!skins.TryGetValue(weaponBase, out var subclass) || string.IsNullOrWhiteSpace(subclass)) continue;
 
-                    ApplySubclass(weapon, steamId, weaponBase, subclass, "ApplyAllWeapons");
+                    if (skins != null && skins.TryGetValue(weaponBase, out var subclass) && !string.IsNullOrWhiteSpace(subclass))
+                    {
+                        ApplySubclass(weapon, steamId, weaponBase, subclass, "ApplyAllWeapons");
+                        continue;
+                    }
+
+                    // 未选皮肤 -> 默认子类（没配置 = 不动）
+                    var defaultSubclass = Utils.GetDefaultSubclass(weaponBase);
+                    if (defaultSubclass != null)
+                        ApplySubclass(weapon, steamId, weaponBase, defaultSubclass, "Default");
                 }
                 catch (Exception ex)
                 {
@@ -141,7 +152,10 @@ public static class Weapons
         }
     }
 
-    /// <summary>还原为该武器的原版子类。</summary>
+    /// <summary>
+    /// 还原为该武器的"默认态"：配置了 DefaultSubclass 就应用它（功能3，"默认态也走子类"），
+    /// 没配置才回落到原版子类本身。
+    /// </summary>
     public static void RestoreToVanilla(CCSPlayerController? player, string weaponBase)
     {
         try
@@ -149,11 +163,13 @@ public static class Weapons
             if (!Players.IsHuman(player)) return;
 
             var steamId = player!.SteamID;
+            var target = Utils.GetDefaultSubclass(weaponBase) ?? weaponBase;
+
             foreach (var weapon in Players.GetWeapons(player))
             {
                 if (GetWeaponBaseName(weapon) != weaponBase) continue;
 
-                ApplySubclass(weapon, steamId, weaponBase, weaponBase, "Restore");
+                ApplySubclass(weapon, steamId, weaponBase, target, target == weaponBase ? "Restore" : "Default");
             }
         }
         catch (Exception ex)
@@ -247,8 +263,12 @@ public static class Weapons
             if (!effective && before.HasValue && after.HasValue)
             {
                 // 记录下来但不再重复尝试（避免刷屏/死循环）
-                Utils.LogError($"[{origin}] 子类 {subclass} 未生效（{weaponBase}）。" +
-                               "若模型/数值都没变，属引擎或资源包问题，与本插件无关。");
+                Utils.LogError(origin == "Default"
+                    ? $"[Default] 默认子类 {subclass} 未生效（{weaponBase}，token 未变化）。" +
+                      "常见原因：资源包 vdata 还没有该子类条目（AcceptInput 静默无效），" +
+                      "或子类名拼写不对。等 vdata 加入后重启地图/服务器再验证。"
+                    : $"[{origin}] 子类 {subclass} 未生效（{weaponBase}）。" +
+                      "若模型/数值都没变，属引擎或资源包问题，与本插件无关。");
             }
 
             return effective;

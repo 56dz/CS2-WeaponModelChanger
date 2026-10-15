@@ -31,10 +31,103 @@ public static class Utils
         return (weaponBase, subclass);
     }
 
+    /// <summary>
+    /// 基准武器 -> "未选皮肤时"使用的默认子类（功能3，例如 weapon_awp -> weapon_awp_10round）。
+    /// 由 <see cref="RebuildDefaultSubclasses"/> 在配置解析后构建；
+    /// 条目级 Equipment.DefaultSubclass 优先于顶层 Config.DefaultSubclasses。
+    /// </summary>
+    public static readonly Dictionary<string, string> DefaultSubclasses = new(StringComparer.Ordinal);
+
+    /// <summary>按当前配置重建默认子类映射；返回条目数（Debug 日志用）。</summary>
+    public static int RebuildDefaultSubclasses(Config? config)
+    {
+        try
+        {
+            DefaultSubclasses.Clear();
+            if (config == null) return 0;
+
+            // 1) 顶层字典
+            if (config.DefaultSubclasses != null)
+            {
+                foreach (var kv in config.DefaultSubclasses)
+                {
+                    var weaponBase = (kv.Key ?? string.Empty).Trim();
+                    var subclass = (kv.Value ?? string.Empty).Trim();
+                    if (weaponBase.Length == 0 || subclass.Length == 0) continue;
+
+                    DefaultSubclasses[weaponBase] = subclass;
+                }
+            }
+
+            // 2) 条目级（更具体：覆盖顶层；同一武器取第一个非空条目）
+            var claimedByEntry = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var equipment in EnumerateEquipments())
+            {
+                var spec = ParseSpec(equipment.Weapon);
+                if (spec == null) continue;
+
+                var subclass = (equipment.DefaultSubclass ?? string.Empty).Trim();
+                if (subclass.Length == 0) continue;
+                if (!claimedByEntry.Add(spec.Value.WeaponBase)) continue;
+
+                DefaultSubclasses[spec.Value.WeaponBase] = subclass;
+            }
+
+            return DefaultSubclasses.Count;
+        }
+        catch (Exception ex)
+        {
+            LogError($"[Config] 构建默认子类映射异常 {ex.GetType().Name}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>取该武器的默认子类；没配置返回 null（= 完全不动这把武器）。</summary>
+    public static string? GetDefaultSubclass(string? weaponBase)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(weaponBase)) return null;
+            if (DefaultSubclasses.TryGetValue(weaponBase.Trim(), out var subclass) &&
+                !string.IsNullOrWhiteSpace(subclass))
+                return subclass.Trim();
+        }
+        catch (Exception ex)
+        {
+            LogError($"[Config] 读取默认子类异常 {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 武器显示名（菜单一级 = 中文武器名，二级 = 中文武器名 - 皮肤名）。
+    ///
+    /// 优先走 CSS 本地化：<c>Localizer["weapon.ak47"]</c>，键在 lang/zh-Hans.json 与
+    /// lang/en.json 里各有一份；命中则直接返回。
+    /// 兜底（lang 缺键/加载失败时）：沿用 v2.0.0 的硬编码简写，最后退回大写原名。
+    /// </summary>
     public static string GetWeaponDisplayName(string weaponBase)
     {
         if (string.IsNullOrEmpty(weaponBase)) return "?";
 
+        // 1) 本地化优先
+        try
+        {
+            var key = "weapon." + (weaponBase.StartsWith("weapon_", StringComparison.OrdinalIgnoreCase)
+                ? weaponBase["weapon_".Length..]
+                : weaponBase);
+
+            var translated = Instance.Localizer[key];
+            if (!string.IsNullOrWhiteSpace(translated) && !string.Equals(translated, key, StringComparison.Ordinal))
+                return translated;
+        }
+        catch
+        {
+            // 本地化失败走兜底
+        }
+
+        // 2) 兜底：硬编码（历史行为，保留以防 lang 文件缺失）
         return weaponBase switch
         {
             "weapon_m4a1" => "M4A4",

@@ -131,9 +131,11 @@ public static class Menu
 
             // 必须闭包捕获新变量，避免循环变量共享
             var localWeaponBase = weaponBase;
+            var display = Utils.GetWeaponDisplayName(weaponBase);
 
-            // 1) 还原选项
-            menu.AddItem(currentSkin == null ? "默认模型（当前）" : "默认模型", (p, _) =>
+            // 1) 还原选项（二级显示格式：中文武器名 - 条目名）
+            var defaultTitle = $"{display} - 默认模型";
+            menu.AddItem(currentSkin == null ? $"{defaultTitle}（当前）" : defaultTitle, (p, _) =>
             {
                 try
                 {
@@ -142,7 +144,11 @@ public static class Menu
                     var controller = p!;
                     Database.RemovePlayerSkin(controller.SteamID, localWeaponBase);
                     Weapons.RestoreToVanilla(controller, localWeaponBase);
-                    Print(controller, $"已还原 {Utils.GetWeaponDisplayName(localWeaponBase)} 的默认模型");
+
+                    var restored = Utils.GetDefaultSubclass(localWeaponBase);
+                    Print(controller, restored == null
+                        ? $"已还原 {display} 的默认模型"
+                        : $"已还原 {display} 的默认模型（默认子类 {restored}）");
                 }
                 catch (Exception ex)
                 {
@@ -150,7 +156,7 @@ public static class Menu
                 }
             });
 
-            // 2) 皮肤选项
+            // 2) 皮肤选项（皮肤名保留原文，如 glock_doro [007]）
             foreach (var item in items)
             {
                 var spec = Utils.ParseSpec(item.Weapon);
@@ -161,7 +167,7 @@ public static class Menu
                 var isCurrent = currentSkin != null &&
                                 string.Equals(currentSkin, localSpec.Subclass, StringComparison.Ordinal);
 
-                var title = isCurrent ? $"{localItem.Name}（当前）" : localItem.Name;
+                var title = $"{display} - {localItem.Name}{(isCurrent ? "（当前）" : "")}";
 
                 menu.AddItem(title, (p, _) =>
                 {
@@ -177,7 +183,7 @@ public static class Menu
                         // 手里有这把武器就立刻换，否则出生/拾取时会自动补上
                         Weapons.ApplyToHeldWeapon(controller, localSpec.WeaponBase, localSpec.Subclass);
 
-                        Print(p, $"已选择 {localItem.Name}（{Utils.GetWeaponDisplayName(localSpec.WeaponBase)}）");
+                        Print(p, $"已选择 {localItem.Name}（{display}）");
                     }
                     catch (Exception ex)
                     {

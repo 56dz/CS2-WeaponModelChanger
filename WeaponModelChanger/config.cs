@@ -15,6 +15,14 @@ public class Config : BasePluginConfig
 
     public Config_Menu Menu { get; set; } = new();
 
+    /// <summary>
+    /// 可选（功能3）：基准武器 -> "未选皮肤时"使用的默认子类。
+    /// 例：{"weapon_awp": "weapon_awp_10round"}。
+    /// 玩家为该武器选过皮肤时**不会**用到这里；两者都没配则完全不动该武器。
+    /// 与条目级 Equipment.DefaultSubclass 并存时，**条目级（更具体）优先**。
+    /// </summary>
+    public Dictionary<string, string> DefaultSubclasses { get; set; } = new(StringComparer.Ordinal);
+
     public Dictionary<string, MenuCategory> Categories { get; set; } = new()
     {
         ["Weapons"] = new MenuCategory
@@ -69,4 +77,12 @@ public class Equipment
 
     /// <summary>格式 "基准武器实体名:子类名"，例如 "weapon_ak47:weapon_skin_001"。</summary>
     public string Weapon { get; set; } = "";
+
+    /// <summary>
+    /// 可选（功能3）：该基准武器"未选任何皮肤"时使用的默认子类。
+    /// 例：AWP 的任一条目上写 "weapon_awp_10round"，则没有 AWP 皮肤的玩家
+    /// 持枪时自动应用这个 10 发子类；已选皮肤的玩家不受影响。
+    /// 同一武器的多个条目若配置不一致，取配置文件里**第一个**非空值。
+    /// </summary>
+    public string DefaultSubclass { get; set; } = "";
 }
