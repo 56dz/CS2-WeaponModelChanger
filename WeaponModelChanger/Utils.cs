@@ -100,6 +100,66 @@ public static class Utils
         return null;
     }
 
+    /// <summary>基准武器 -> 子类生效后允许上补到的弹匣上限（v2.0.2 回退方案，首选读 VData）。</summary>
+    public static readonly Dictionary<string, int> RefillClips = new(StringComparer.Ordinal);
+
+    /// <summary>按当前配置重建弹匣刷新映射（条目级覆盖顶层）。返回条目数。</summary>
+    public static int RebuildRefillClips(Config? config)
+    {
+        try
+        {
+            RefillClips.Clear();
+            if (config == null) return 0;
+
+            // 1) 顶层字典
+            if (config.RefillClip != null)
+            {
+                foreach (var kv in config.RefillClip)
+                {
+                    var weaponBase = (kv.Key ?? string.Empty).Trim();
+                    if (weaponBase.Length == 0 || kv.Value <= 0) continue;
+
+                    RefillClips[weaponBase] = kv.Value;
+                }
+            }
+
+            // 2) 条目级（更具体：覆盖顶层；同一武器取第一个 > 0 的条目）
+            var claimedByEntry = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var equipment in EnumerateEquipments())
+            {
+                var spec = ParseSpec(equipment.Weapon);
+                if (spec == null) continue;
+                if (equipment.RefillClip <= 0) continue;
+                if (!claimedByEntry.Add(spec.Value.WeaponBase)) continue;
+
+                RefillClips[spec.Value.WeaponBase] = equipment.RefillClip;
+            }
+
+            return RefillClips.Count;
+        }
+        catch (Exception ex)
+        {
+            LogError($"[Config] 构建弹匣刷新映射异常 {ex.GetType().Name}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>取该武器配置的弹匣刷新上限；没配置返回 null（= 只按 VData 走）。</summary>
+    public static int? GetRefillClip(string? weaponBase)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(weaponBase)) return null;
+            if (RefillClips.TryGetValue(weaponBase.Trim(), out var value) && value > 0) return value;
+        }
+        catch (Exception ex)
+        {
+            LogError($"[Config] 读取弹匣刷新配置异常 {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// 武器显示名（菜单一级 = 中文武器名，二级 = 中文武器名 - 皮肤名）。
     ///

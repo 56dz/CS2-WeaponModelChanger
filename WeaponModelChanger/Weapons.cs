@@ -246,6 +246,7 @@ public static class Weapons
             }
 
             var before = TryGetSubclassToken(weapon);
+            var beforeMax = TryGetMaxClip1(weapon); // 切换前的 VData 弹匣上限（用于"只在上限真提高时补"）
 
             weapon.AcceptInput("ChangeSubclass", weapon, weapon, subclass);
             Applied[key] = subclass;
@@ -271,6 +272,11 @@ public static class Weapons
                       "若模型/数值都没变，属引擎或资源包问题，与本插件无关。");
             }
 
+            // 子类真的生效了才刷新弹匣（v2.0.2：购买时按旧 VData 填的 5 发，
+            // 切到 10 发子类后 m_iClip1 不会自动重算，换一次弹才会补满）
+            if (effective)
+                TryRefillClip(weapon, weaponBase, subclass, beforeMax, origin);
+
             return effective;
         }
         catch (Exception ex)
@@ -278,6 +284,132 @@ public static class Weapons
             Utils.LogError($"[{origin}] AcceptInput(ChangeSubclass, {subclass}) 异常 " +
                            $"{ex.GetType().Name}: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>读切换后的 VData 弹匣上限（CBasePlayerWeaponVData.m_iMaxClip1）。失败返回 null。</summary>
+    public static int? TryGetMaxClip1(CBasePlayerWeapon? weapon)
+    {
+        try
+        {
+            if (weapon == null || !weapon.IsValid) return null;
+
+            var vdata = weapon.VData; // CSS: CBasePlayerWeapon.VData -> GetVData<CBasePlayerWeaponVData>()
+            if (vdata == null) return null;
+
+            return vdata.MaxClip1; // ref int 读 CBasePlayerWeaponVData.m_iMaxClip1
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>读当前弹匣（CBasePlayerWeapon.m_iClip1）。失败返回 null。</summary>
+    public static int? TryGetClip1(CBasePlayerWeapon? weapon)
+    {
+        try
+        {
+            if (weapon == null || !weapon.IsValid) return null;
+            return weapon.Clip1;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 写弹匣 + 标记网络字段变更 + 回读校验。全程 try/catch，任何一步失败都返回 false。
+    /// m_iClip1 是网络化字段，写完必须 SetStateChanged 才会同步到客户端 HUD。
+    /// </summary>
+    private static bool TryWriteClip1(CBasePlayerWeapon weapon, int value)
+    {
+        try
+        {
+            if (weapon == null || !weapon.IsValid) return false;
+
+            weapon.Clip1 = value; // ref 返回属性，直写 schema 内存（不碰引擎签名/gamedata）
+
+            try
+            {
+                Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_iClip1", 0);
+            }
+            catch (Exception ex)
+            {
+                Utils.LogError($"[Clip] SetStateChanged(m_iClip1) 异常 {ex.GetType().Name}: {ex.Message}");
+            }
+
+            var readback = weapon.Clip1;
+            return readback == value;
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Clip] 写入 m_iClip1={value} 异常 {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 子类生效后刷新弹匣（v2.0.2）。
+    ///
+    /// 规则（安全）：
+    /// 1) 目标上限 = max(VData 切换后的 m_iMaxClip1, 配置 RefillClip[weapon])，必须 > 0；
+    ///    VData 读不到才只用配置（配置也没配就完全不动）。
+    /// 2) **只在子类真的提高了上限时补**（beforeMax &lt; target）：换皮肤/选皮肤时上限没变
+    ///    （如 AK 30 -> 30）一律不补，避免"换皮肤白嫖子弹"的观感。
+    /// 3) 只升不降：当前 clip &gt;= 目标就什么都不做；clip &lt; 目标才上补到目标。
+    /// 4) 只在 ApplySubclass 那一刻执行一次（复用 Applied 幂等缓存，不挂在任何 tick/换弹/开火）。
+    /// </summary>
+    private static void TryRefillClip(CBasePlayerWeapon weapon, string weaponBase, string subclass, int? beforeMax, string origin)
+    {
+        try
+        {
+            if (weapon == null || !weapon.IsValid) return;
+
+            var afterMax = TryGetMaxClip1(weapon);
+            var configured = Utils.GetRefillClip(weaponBase);
+
+            int? target = null;
+            if (afterMax.HasValue && afterMax.Value > 0) target = afterMax.Value;
+            if (configured.HasValue && configured.Value > 0 && (!target.HasValue || configured.Value > target.Value))
+                target = configured.Value;
+
+            if (!target.HasValue)
+            {
+                Utils.Debug($"[{origin}] {weaponBase} 无弹匣上限可读（VData 为空且未配置 RefillClip），跳过刷新");
+                return;
+            }
+
+            // 只在子类真的提高了上限时补（beforeMax 读不到时按配置补 —— 回退语义）
+            if (beforeMax.HasValue && beforeMax.Value > 0 && target.Value <= beforeMax.Value)
+            {
+                Utils.Debug($"[{origin}] {weaponBase} 弹匣上限未提高（{beforeMax.Value} -> {target.Value}），不刷新");
+                return;
+            }
+
+            var clip = TryGetClip1(weapon);
+            if (!clip.HasValue || clip.Value < 0)
+            {
+                Utils.Debug($"[{origin}] {weaponBase} 当前弹匣读不到（{clip?.ToString() ?? "?"}），跳过刷新");
+                return;
+            }
+
+            if (clip.Value >= target.Value) return; // 只升不降
+
+            var from = clip.Value;
+            if (TryWriteClip1(weapon, target.Value))
+            {
+                Utils.Debug($"[Clip] {weaponBase} 弹匣 {from} -> {target.Value}（子类 {subclass}，origin={origin}）");
+            }
+            else
+            {
+                Utils.LogError($"[Clip] {weaponBase} 弹匣刷新失败：{from} -> {target.Value}（子类 {subclass}）回读不一致");
+            }
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Clip] {weaponBase} 弹匣刷新异常 {ex.GetType().Name}: {ex.Message}");
         }
     }
 
