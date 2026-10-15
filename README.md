@@ -2,8 +2,11 @@
 
 CS2 服务端武器模型（皮肤）替换插件：玩家用 **WASD 菜单**选皮肤，选择立刻写库，每次进服/出生自动重新应用。
 
-> **v2.0.0 是完全重写版**（早期版本由网页版 AI 生成，存在"换皮肤不生效"和"进服崩服"两类严重问题）。
-> 重写原因、崩溃点定位与防崩设计见文末「v2.0.0 重写说明」。
+当前版本 **v2.0.2**。
+
+v2.0.0 起对代码做了完整重写。早期版本有两个根因明确的问题：**换皮肤不生效**（数据库用相对路径，
+进程工作目录一变就静默新建空库）与**进服后崩服**（对玩家武器做原生读取时用了未校验的实体索引 /
+强制解引用）。重写补齐了换装时机、资源登记与弹匣刷新，逐条见文末「更新记录」。
 
 ---
 
@@ -185,6 +188,36 @@ CS2 服务端武器模型（皮肤）替换插件：玩家用 **WASD 菜单**选
 
 ## 八、更新记录
 
+### v2.0.2（2026-10-15）
+
+**修复：AWP 购买后先显示 5 发，换一次弹才变 10 发**
+
+`m_iDefaultClip1` 只在武器创建时生效，而子类是在创建之后才切换的 —— 弹匣按旧 VData 填了 5 发，
+切到 10 发子类后已填充的 `m_iClip1` 不会自动重算。现在在 `ChangeSubclass` 成功
+（`subclassToken` 前后不同）之后，读切换后的 `CBasePlayerWeaponVData.MaxClip1` 刷新弹匣。
+
+安全闸（避免"换皮肤白嫖子弹"）：
+
+- 只在子类**真的提高了上限**时补（`beforeMax < target`，如 AWP 5→10；AK 30→30 不补）
+- 只升不降（`clip >= target` 直接跳过）
+- 只在应用子类那一刻执行一次（复用幂等缓存，不挂 tick / 换弹 / 开火）
+- 写 `weapon.Clip1`（`ref int` 直写 schema）+ `Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_iClip1", 0)` + 回读校验
+- 可选兜底配置 `"RefillClip": { "weapon_awp": 10 }`，仅在 VData 读不到时使用
+
+### v2.0.1（2026-10-15）
+
+1. **修复 ERROR 模型**：皮肤模型文件存在于资源包中，但引擎报
+   `RESOURCE_TYPE_MODEL ... requested but not resident (Missing from a manifest?)` ——
+   模型没有被登记进服务端资源清单。现在在 `OnServerPrecacheResources` 中对 89 个皮肤的
+   `m_szWorldModel` 逐条 `manifest.AddResource(...)`
+   （路径 `weapons/models/<skin>/<skin>.vmdl`，不带 `_c`）。
+2. **菜单武器名中文化**：`lang/zh-Hans.json` 提供「基准武器 → 中文名」映射，
+   一级菜单显示 `格洛克`，二级显示 `格洛克 - glock_doro [007]`；缺键时回退原名。
+3. **默认子类机制**：新增顶层 `DefaultSubclasses` 与条目级 `DefaultSubclass`，用于
+   「没有选择皮肤时也应用某个子类」。配合资源包的 `weapon_awp_10round`，让**默认 AWP 也是 10 发**
+   —— 因为 addon 的 `weapons.vdata` 是合并语义：**新增条目有效，覆盖基础游戏已有条目无效**。
+   已选皮肤的玩家不会被默认子类覆盖。
+
 ### v2.0.0 —— 完全重写（2026-10-15）
 
 **修复的两个根因**
@@ -215,9 +248,9 @@ CS2 服务端武器模型（皮肤）替换插件：玩家用 **WASD 菜单**选
 
 **其它改进**
 
-- 菜单改为 **WasdMenu**（用户明确要求），支持 `MenuType` 配置切换其它菜单类型。
-- 数据库读写全部带日志与容错；`SetStateChanged` 之类的原生调用一律不做（1.0.376 的 `SubclassID` 只有 getter，
-  也没有合法的替代写路径）。
+- 菜单默认使用 **WasdMenu**，可用 `MenuType` 切换 `ChatMenu` / `CenterHtmlMenu` / `ConsoleMenu`。
+- 数据库读写全部带日志与容错。注意 CSS 1.0.376 的 `SubclassID` **只有 getter**、`Schema.*` 全为只读，
+  换子类只能走 `AcceptInput("ChangeSubclass")`，没有合法的替代写路径。
 - 代码按职责拆分：`main / config / Utils / Players / Database / Weapons / Menu / Commands / Events`。
 
 ---
