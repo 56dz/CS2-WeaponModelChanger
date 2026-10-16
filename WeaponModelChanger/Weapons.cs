@@ -15,16 +15,38 @@ using CounterStrikeSharp.API.Core;
 /// </summary>
 public static class Weapons
 {
-    /// <summary>已应用记录："steamId:武器句柄" -> 子类名（幂等，避免重复改子类）。</summary>
-    private static readonly Dictionary<string, string> Applied = new(StringComparer.Ordinal);
+    /// <summary>
+    /// 已应用记录："steamId:武器句柄" -> (子类名, 应用后读到的 subclassToken)。
+    ///
+    /// ⚠️ 重要教训（v2.0.3 修的真实 bug）：
+    /// 引擎会**复用实体句柄**。原来这里只存子类名，重进游戏/实体重建后新武器拿到
+    /// 旧句柄时会被误判成"已经应用过"而跳过，结果新实体仍是默认子类 —— 现象就是
+    /// 用户报的"退出重进后武器皮肤没加载、匕首模型没加载，死后下一回合才全部正常"。
+    /// 所以现在连**应用后读到的 token** 一起存，跳过前必须回读实体当前 token 比对。
+    /// </summary>
+    private static readonly Dictionary<string, AppliedEntry> Applied = new(StringComparer.Ordinal);
+
+    /// <summary>一条已应用记录：子类名 + 应用成功后从实体读到的 subclassToken（读不到为 null）。</summary>
+    private readonly record struct AppliedEntry(string Subclass, long? Token);
 
     private static string Key(ulong steamId, nint handle) => $"{steamId}:{handle}";
+
+    /// <summary>
+    /// 每个连接已经强制刷新过的"轮次"计数（steamId -> 次数），断开/换图时清空。
+    /// 用计数而不是布尔锁：客户端挂载 addon 的时机不确定，多次出生各刷一次能明显提高
+    /// 命中率；超过 MaxRefreshPerConnect 次就停手，避免反复制造模型闪动。
+    /// </summary>
+    private static readonly Dictionary<ulong, int> RefreshRounds = new();
+
+    /// <summary>每次连接最多强制刷新几轮。</summary>
+    private const int MaxRefreshPerConnect = 3;
 
     public static void ClearState()
     {
         try
         {
             Applied.Clear();
+            RefreshRounds.Clear();
         }
         catch
         {
@@ -36,6 +58,8 @@ public static class Weapons
     {
         try
         {
+            RefreshRounds.Remove(steamId);
+
             var prefix = $"{steamId}:";
             foreach (var key in Applied.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
                 Applied.Remove(key);
@@ -43,6 +67,142 @@ public static class Weapons
         catch
         {
             // ignored
+        }
+    }
+
+    /// <summary>
+    /// v2.0.3：进服后强制刷新一次子类（每个连接只做一次）。
+    ///
+    /// 背景（实测日志定位）：玩家"退出重进"时，服务端的武器实体**没有重建**，
+    /// 已应用的子类值一直没变；而新客户端是在连接快照里第一次收到这个子类值的，
+    /// 那时它还没挂载完资源包 vdata，模型解析回退成原版模型。之后子类没有任何"变更"，
+    /// 客户端就再也不会重新解析模型 —— 现象就是"重进后皮肤/匕首模型没加载，
+    /// 死后下一回合（实体真正重建）才全部正常"。
+    ///
+    /// 做法：对该玩家当前持有、且我们已应用过皮肤子类的武器，
+    /// **先切回原版子类、稍后（0.25s）再切回皮肤子类**，制造两次真实的子类变更事件，
+    /// 让已经挂载好 addon 的客户端重新解析模型。全程 try/catch + 有效性校验。
+    /// </summary>
+    public static void ForceRefreshAll(CCSPlayerController? player)
+    {
+        try
+        {
+            if (!Players.IsHuman(player)) return;
+
+            var controller = player!;
+            var steamId = controller.SteamID;
+            if (steamId == 0) return;
+
+            RefreshRounds.TryGetValue(steamId, out var rounds);
+            if (rounds >= MaxRefreshPerConnect)
+            {
+                Utils.Debug($"[Refresh] 玩家 {controller.PlayerName} 本次连接已强制刷新 {rounds} 轮，跳过");
+                return;
+            }
+            RefreshRounds[steamId] = rounds + 1;
+
+            Database.LoadPlayerSkins(steamId);
+            Database.PlayerSkinCache.TryGetValue(steamId, out var skins);
+
+            var queued = 0;
+
+            foreach (var weapon in Players.GetWeapons(controller))
+            {
+                try
+                {
+                    if (weapon == null || !weapon.IsValid) continue;
+
+                    var weaponBase = GetWeaponBaseName(weapon);
+                    if (weaponBase == null) continue;
+
+                    // 目标子类：玩家选的皮肤，否则配置的默认子类
+                    string? target = null;
+                    if (skins != null && skins.TryGetValue(weaponBase, out var skin) && !string.IsNullOrWhiteSpace(skin))
+                        target = skin;
+                    else
+                        target = Utils.GetDefaultSubclass(weaponBase);
+
+                    if (string.IsNullOrWhiteSpace(target)) continue;
+                    if (string.Equals(target, weaponBase, StringComparison.Ordinal)) continue; // 本来就是原版
+
+                    // 不该用 Applied 缓存做守卫：断线时已按 steamId 清空，用它会导致
+                    // "重进后一条都刷不到" —— 恰好把要修的场景排除了。
+                    // 只要这台武器"应该有非原版子类"，就刷新它对不对都由引擎状态决定。
+                    var liveToken = TryGetSubclassToken(weapon);
+                    if (!liveToken.HasValue) continue; // 实体不可读（正在销毁等）→ 跳过
+
+                    var localWeapon = weapon;
+                    var localTarget = target;
+                    var localBase = weaponBase;
+                    var handle = weapon.Handle;
+
+                    // 目标子类对应的 token：先按"皮肤子类"解析一次拿基准（用于兜底复核比对）。
+                    // 这一步不改实体，只是把当前皮肤状态下的 token 记下来。
+                    var skinTokenBeforeReset = liveToken;
+
+                    // ① 先切回原版，制造一次真实的变更
+                    ApplySubclass(localWeapon, steamId, localBase, localBase, "RefreshReset", force: true);
+
+                    // ② 稍后再切回皮肤子类（此时客户端已挂载好 addon，会重新解析模型）
+                    Plugin.Instance.AddTimer(0.25f, () =>
+                    {
+                        try
+                        {
+                            if (!localWeapon.IsValid) return;
+                            ApplySubclass(localWeapon, steamId, localBase, localTarget, "RefreshApply", force: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Utils.LogError($"[Refresh] 切回子类异常 {ex.GetType().Name}: {ex.Message}");
+                        }
+                    });
+
+                    // ③ 兜底复核：防止 ①/② 之间被打断（换图、热重载、异常）导致玩家
+                    //    停在"原版模型"这种比原 bug 更糟的状态。
+                    Plugin.Instance.AddTimer(1.5f, () =>
+                    {
+                        try
+                        {
+                            var owner = Players.FromSteamId(steamId);
+                            if (owner == null) return;
+
+                            var w = Players.GetWeapons(owner).FirstOrDefault(x => x != null && x.IsValid && x.Handle == handle);
+                            if (w == null) return; // 已经不在身上了
+
+                            var current = TryGetSubclassToken(w);
+
+                            // 已经恢复到皮肤 token（或本来就等于刷新前）→ 无需处理
+                            if (current.HasValue && skinTokenBeforeReset.HasValue &&
+                                current.Value == skinTokenBeforeReset.Value)
+                                return;
+
+                            if (Plugin.Instance.DebugEnabled)
+                                Utils.Log($"[Refresh] 兜底复核：{localBase} 未停在 {localTarget}" +
+                                          $"（当前 token {current?.ToString() ?? "?"}），补应用一次");
+
+                            ApplySubclass(w, steamId, localBase, localTarget, "RefreshVerify", force: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Utils.LogError($"[Refresh] 兜底复核异常 {ex.GetType().Name}: {ex.Message}");
+                        }
+                    });
+
+                    queued++;
+                }
+                catch (Exception ex)
+                {
+                    Utils.LogError($"[Refresh] 单把武器刷新异常 {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            if (queued > 0)
+                Utils.Log($"[Refresh] 玩家 {controller.PlayerName} 已排队强制刷新 {queued} 把武器的子类" +
+                          $"（第 {RefreshRounds[steamId]}/{MaxRefreshPerConnect} 轮，修复重进后模型不加载）");
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Refresh] ForceRefreshAll 异常 {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -228,8 +388,11 @@ public static class Weapons
     /// <summary>
     /// 唯一原生调用点。幂等 + 前后校验 + 全程 try/catch。
     /// 返回是否"看起来生效"（无法确认时返回 false，但不影响其它逻辑）。
+    ///
+    /// force=true 时**跳过幂等缓存**，强制发一次 ChangeSubclass
+    /// （ForceRefreshAll 的"先切回原版再切回皮肤"需要真实变更，不能被缓存吞掉）。
     /// </summary>
-    private static bool ApplySubclass(CBasePlayerWeapon weapon, ulong steamId, string weaponBase, string subclass, string origin)
+    private static bool ApplySubclass(CBasePlayerWeapon weapon, ulong steamId, string weaponBase, string subclass, string origin, bool force = false)
     {
         try
         {
@@ -239,19 +402,40 @@ public static class Weapons
 
             var key = Key(steamId, weapon.Handle);
 
-            if (Applied.TryGetValue(key, out var already) && string.Equals(already, subclass, StringComparison.Ordinal))
+            // 跳过前必须回读实体当前 token 与缓存比对（句柄会被复用，不能只信缓存）。
+            if (!force && Applied.TryGetValue(key, out var already) &&
+                string.Equals(already.Subclass, subclass, StringComparison.Ordinal))
             {
-                Utils.Debug($"[{origin}] {weaponBase} 已经是 {subclass}，跳过");
-                return true;
+                var liveToken = TryGetSubclassToken(weapon);
+
+                if (already.Token.HasValue && liveToken.HasValue)
+                {
+                    if (already.Token.Value == liveToken.Value)
+                    {
+                        Utils.Debug($"[{origin}] {weaponBase} 已是 {subclass}（token {liveToken.Value} 一致），跳过");
+                        return true;
+                    }
+
+                    // 句柄复用 / 实体被重建：缓存不可信，重新应用
+                    Utils.Debug($"[{origin}] {weaponBase} 缓存命中 {subclass} 但实体 token 不一致" +
+                                $"（缓存 {already.Token.Value} / 实体 {liveToken.Value}），重新应用");
+                }
+                else
+                {
+                    // 有一边读不到 token（拿不准）→ 维持旧的保守行为，避免每次调用都重发
+                    Utils.Debug($"[{origin}] {weaponBase} 已是 {subclass}（token 不可读，按缓存跳过）");
+                    return true;
+                }
             }
 
             var before = TryGetSubclassToken(weapon);
             var beforeMax = TryGetMaxClip1(weapon); // 切换前的 VData 弹匣上限（用于"只在上限真提高时补"）
 
             weapon.AcceptInput("ChangeSubclass", weapon, weapon, subclass);
-            Applied[key] = subclass;
 
             var after = TryGetSubclassToken(weapon);
+            Applied[key] = new AppliedEntry(subclass, after);
+
             var effective = before.HasValue && after.HasValue && before.Value != after.Value;
 
             if (Plugin.Instance.DebugEnabled || !effective)

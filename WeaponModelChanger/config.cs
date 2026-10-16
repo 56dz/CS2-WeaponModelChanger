@@ -13,6 +13,20 @@ public class Config : BasePluginConfig
     /// </summary>
     public bool Debug { get; set; } = false;
 
+    /// <summary>
+    /// 可选（v2.0.3 修复"重进游戏后模型不加载，要等下一回合"）：
+    /// 玩家进服后强制把已应用的子类**重新切换一次**（先切回原版子类、再切回皮肤子类），
+    /// 目的是给客户端制造一次真实的"子类变更"网络事件 —— 因为客户端是在连接快照里
+    /// 第一次拿到子类的，那时它还没挂载完资源包 vdata，模型解析会回退成原版模型；
+    /// 之后子类值一直没变，客户端就再也不会重新解析，只能等实体重建（死亡/下一回合）。
+    /// 强制切换会带来一次很短的模型闪动（默认 3 秒后执行，通常在准备时间内），
+    /// 不想看到闪动可设为 false。
+    /// </summary>
+    public bool ForceModelRefresh { get; set; } = true;
+
+    /// <summary>强制刷新的延迟秒数（等客户端挂载完 addon / 进服稳定）。</summary>
+    public float ForceRefreshDelay { get; set; } = 3.0f;
+
     public Config_Menu Menu { get; set; } = new();
 
     /// <summary>

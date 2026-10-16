@@ -12,6 +12,7 @@ public static class Events
         {
             Instance.RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
             Instance.RegisterEventHandler<EventItemPickup>(OnItemPickup);
+            Instance.RegisterEventHandler<EventItemEquip>(OnItemEquip);
             Instance.RegisterEventHandler<EventRoundStart>(OnRoundStart);
             Instance.RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
             Instance.RegisterListener<Listeners.OnMapStart>(OnMapStart);
@@ -30,6 +31,7 @@ public static class Events
         {
             Instance.DeregisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
             Instance.DeregisterEventHandler<EventItemPickup>(OnItemPickup);
+            Instance.DeregisterEventHandler<EventItemEquip>(OnItemEquip);
             Instance.DeregisterEventHandler<EventRoundStart>(OnRoundStart);
             Instance.DeregisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
             Instance.RemoveListener<Listeners.OnMapStart>(OnMapStart);
@@ -45,6 +47,7 @@ public static class Events
     {
         try
         {
+            // v2.0.3：换图后实体全部重建，清空全部缓存状态（含"本次连接已强制刷新"标记）
             Weapons.ClearState();
             Database.PlayerSkinCache.Clear();
             Utils.Debug($"[Events] 地图开始 {mapName}，已清空换装状态");
@@ -116,9 +119,33 @@ public static class Events
             var steamId = controller.SteamID;
             Database.LoadPlayerSkins(steamId);
 
-            // 1 秒内多次尝试，覆盖"武器还没到手"的时间差
+            // 1 秒内多次尝试，覆盖"武器还没到手"的时间差；
+            // v2.0.3 追加 3.0s：重进游戏时客户端挂载 addon 较慢，早几帧应用可能不显示，
+            // 多一次复核能显著减少"要等下一回合才正常"的情况（有 token 比对兜底，不会重复改）。
             Weapons.ScheduleApply(controller, 0.5f);
             Weapons.ScheduleApply(controller, 1.5f);
+            Weapons.ScheduleApply(controller, 3.0f);
+
+            // v2.0.3：进服后强制刷新一次子类（制造真实的子类变更事件，让客户端重新解析模型）。
+            // 修复"退出重进后皮肤/匕首模型不加载，死后下一回合才恢复"。
+            if (Plugin.Instance.Config.ForceModelRefresh)
+            {
+                var delay = Plugin.Instance.Config.ForceRefreshDelay;
+                if (delay < 0.1f) delay = 0.1f;
+
+                Plugin.Instance.AddTimer(delay, () =>
+                {
+                    try
+                    {
+                        var target = Players.FromSteamId(steamId);
+                        if (target != null) Weapons.ForceRefreshAll(target);
+                    }
+                    catch (Exception ex)
+                    {
+                        Utils.LogError($"[Events] 强制刷新异常 {ex.GetType().Name}: {ex.Message}");
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -153,6 +180,43 @@ public static class Events
         catch (Exception ex)
         {
             Utils.LogError($"[Events] OnItemPickup 异常 {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return HookResult.Continue;
+    }
+
+    /// <summary>
+    /// 切换/拿出武器：重新核对子类。
+    ///
+    /// v2.0.3 新增。用户报的"重进游戏后匕首模型没加载，但切刀动作已经是新模型的"
+    /// 属句柄复用导致的缓存误判（见 Weapons.Applied 注释）。玩家每次掏出武器都是一次
+    /// 天然的复核时机：这里延迟一点点再比对实体真实 token，不一致就当场补上，
+    /// 不用等到下一回合实体重建。
+    /// </summary>
+    private static HookResult OnItemEquip(EventItemEquip @event, GameEventInfo info)
+    {
+        try
+        {
+            var player = @event.Userid;
+            if (!Players.IsHuman(player)) return HookResult.Continue;
+
+            var steamId = player!.SteamID;
+            Plugin.Instance.AddTimer(0.1f, () =>
+            {
+                try
+                {
+                    var target = Players.FromSteamId(steamId);
+                    if (target != null) Weapons.ApplyAllWeapons(target);
+                }
+                catch (Exception ex)
+                {
+                    Utils.LogError($"[Events] 换武器后复核异常 {ex.GetType().Name}: {ex.Message}");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Utils.LogError($"[Events] OnItemEquip 异常 {ex.GetType().Name}: {ex.Message}");
         }
 
         return HookResult.Continue;

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 public partial class Plugin : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "WeaponModelChanger";
-    public override string ModuleVersion => "2.0.2";
+    public override string ModuleVersion => "2.0.3";
     public override string ModuleAuthor => "56dz";
 
     public static Plugin Instance { get; set; } = new();
@@ -59,6 +59,7 @@ public partial class Plugin : BasePlugin, IPluginConfig<Config>
                               $"菜单类型={Config.Menu.MenuType} 分类数={Config.Categories.Count} " +
                               $"皮肤条目={Utils.CountEquipments(Config)} 默认子类={Utils.DefaultSubclasses.Count} " +
                               $"弹匣刷新={Utils.RefillClips.Count} " +
+                              $"强制刷新={Config.ForceModelRefresh}({Config.ForceRefreshDelay}s) " +
                               $"资源模型={SkinModelPaths.ModelPathCount} 数据库={Database.DbPath}");
     }
 
