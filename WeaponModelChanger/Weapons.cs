@@ -140,52 +140,51 @@ public static class Weapons
                     // 这一步不改实体，只是把当前皮肤状态下的 token 记下来。
                     var skinTokenBeforeReset = liveToken;
 
-                    // ① 先切回原版，制造一次真实的变更
+                    // ① 先切回原版，制造一次真实的变更（异步生效，见 WaitForToken）
                     ApplySubclass(localWeapon, steamId, localBase, localBase, "RefreshReset", force: true);
 
-                    // ② 稍后再切回皮肤子类（此时客户端已挂载好 addon，会重新解析模型）
-                    Plugin.Instance.AddTimer(0.25f, () =>
+                    // ② reset 生效后再切回皮肤子类。
+                    //    v2.0.3 的教训：引擎的 ChangeSubclass 是**异步**的，AcceptInput 只入队，
+                    //    实际 token 变化要等后面若干 tick。原来固定 0.25s 后直接 apply，
+                    //    在武器已稳定存在时会和尚未完成的 reset 撞车被引擎吞掉
+                    //    （日志实证：08:08:34.744 reset 成功 -> .756 apply 却 2923023425 -> 2923023425）。
+                    //    改为**轮询回读到 reset 的 token 变了**才继续，彻底去掉时序赌博。
+                    WaitForToken(localWeapon, handle, resetFrom: liveToken, timeoutSeconds: 2.0f, then: () =>
                     {
-                        try
+                        if (!localWeapon.IsValid) return;
+
+                        // ③ 应用目标皮肤子类；引擎可能吞掉偶发的切换，轮询确认 + 有限次重试。
+                        //    先读 apply 前的 token，再发切换，然后等 token 变化。
+                        var tokenBeforeApply = TryGetSubclassToken(localWeapon);
+                        ApplySubclass(localWeapon, steamId, localBase, localTarget, "RefreshApply", force: true);
+
+                        WaitForToken(localWeapon, handle, resetFrom: null, timeoutSeconds: 2.0f,
+                                     then: () =>
                         {
-                            if (!localWeapon.IsValid) return;
-                            ApplySubclass(localWeapon, steamId, localBase, localTarget, "RefreshApply", force: true);
-                        }
-                        catch (Exception ex)
-                        {
-                            Utils.LogError($"[Refresh] 切回子类异常 {ex.GetType().Name}: {ex.Message}");
-                        }
-                    });
+                            try
+                            {
+                                if (!localWeapon.IsValid) return;
 
-                    // ③ 兜底复核：防止 ①/② 之间被打断（换图、热重载、异常）导致玩家
-                    //    停在"原版模型"这种比原 bug 更糟的状态。
-                    Plugin.Instance.AddTimer(1.5f, () =>
-                    {
-                        try
-                        {
-                            var owner = Players.FromSteamId(steamId);
-                            if (owner == null) return;
+                                var owner = Players.FromSteamId(steamId);
+                                if (owner == null) return;
 
-                            var w = Players.GetWeapons(owner).FirstOrDefault(x => x != null && x.IsValid && x.Handle == handle);
-                            if (w == null) return; // 已经不在身上了
+                                var w = Players.GetWeapons(owner).FirstOrDefault(x => x != null && x.IsValid && x.Handle == handle);
+                                if (w == null) return; // 已经不在身上了
 
-                            var current = TryGetSubclassToken(w);
+                                var cur = TryGetSubclassToken(w);
+                                if (cur.HasValue && cur.Value == skinTokenBeforeReset.Value)
+                                    return; // 已回到目标皮肤子类
 
-                            // 已经恢复到皮肤 token（或本来就等于刷新前）→ 无需处理
-                            if (current.HasValue && skinTokenBeforeReset.HasValue &&
-                                current.Value == skinTokenBeforeReset.Value)
-                                return;
-
-                            if (Plugin.Instance.DebugEnabled)
+                                // 补应用：cross-tick，且每次切换之间都等待引擎落地
                                 Utils.Log($"[Refresh] 兜底复核：{localBase} 未停在 {localTarget}" +
-                                          $"（当前 token {current?.ToString() ?? "?"}），补应用一次");
-
-                            ApplySubclass(w, steamId, localBase, localTarget, "RefreshVerify", force: true);
-                        }
-                        catch (Exception ex)
-                        {
-                            Utils.LogError($"[Refresh] 兜底复核异常 {ex.GetType().Name}: {ex.Message}");
-                        }
+                                          $"（当前 token {cur?.ToString() ?? "?"}），补应用一次");
+                                ApplySubclass(w, steamId, localBase, localTarget, "RefreshVerify", force: true);
+                            }
+                            catch (Exception ex)
+                            {
+                                Utils.LogError($"[Refresh] 兜底复核异常 {ex.GetType().Name}: {ex.Message}");
+                            }
+                        }, expectDifferentFrom: tokenBeforeApply);
                     });
 
                     queued++;
@@ -383,6 +382,76 @@ public static class Weapons
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// 轮询等待引擎把 ChangeSubclass 真正落地，落地后再执行 <paramref name="then"/>。
+    ///
+    /// 为什么必须轮询：`AcceptInput("ChangeSubclass")` 是**异步**的 —— 调用只把切换入队，
+    /// m_nSubclassID 要等引擎后续 tick 才更新。v2.0.3 用固定 0.25s 延时去"等"，
+    /// 在武器实体已稳定存在时会被引擎吞掉（日志实证：reset 与 apply 间隔 12ms，
+    /// apply 的 token 原地不动 2923023425 -> 2923023425），玩家的皮肤就一直不加载，
+    /// 只有死亡重生换新实体后才恢复。
+    ///
+    /// 判据二选一：
+    ///  - <paramref name="resetFrom"/> 有值：等到 token **不再是** resetFrom（= reset 已落地）
+    ///  - <paramref name="expectDifferentFrom"/> 有值：等到 token **不再等于**该值（= apply 已落地）
+    /// 超时（默认 2s）则放弃等待，由调用方后续兜底复核处理。
+    /// </summary>
+    private static void WaitForToken(CEntityInstance? entity, nint handle,
+                                     long? resetFrom, float timeoutSeconds, Action then,
+                                     long? expectDifferentFrom = null)
+    {
+        var deadline = timeoutSeconds;
+        var elapsed = 0f;
+        const float step = 0.05f;
+
+        void Poll()
+        {
+            try
+            {
+                elapsed += step;
+
+                // 实体失效（换图/武器被移除）→ 放弃，交给兜底层
+                if (entity == null || !entity.IsValid)
+                {
+                    Utils.Debug($"[WaitForToken] 实体已失效（handle {handle}），放弃等待");
+                    return;
+                }
+
+                var token = TryGetSubclassToken(entity);
+
+                var done = false;
+                if (resetFrom.HasValue)
+                    done = token.HasValue && token.Value != resetFrom.Value;
+                else if (expectDifferentFrom.HasValue)
+                    done = token.HasValue && token.Value != expectDifferentFrom.Value;
+
+                if (done)
+                {
+                    Utils.Debug($"[WaitForToken] 落地（handle {handle}，token {token?.ToString() ?? "?"}，" +
+                                $"耗时 {elapsed:F2}s）");
+                    then();
+                    return;
+                }
+
+                if (elapsed >= deadline)
+                {
+                    Utils.LogError($"[WaitForToken] 等待超时 {deadline:F1}s（handle {handle}，" +
+                                   $"当前 token {token?.ToString() ?? "?"}），交给兜底复核");
+                    then();
+                    return;
+                }
+
+                Plugin.Instance.AddTimer(step, Poll);
+            }
+            catch (Exception ex)
+            {
+                Utils.LogError($"[WaitForToken] 异常 {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        Plugin.Instance.AddTimer(step, Poll);
     }
 
     /// <summary>

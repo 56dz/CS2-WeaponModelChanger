@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 public partial class Plugin : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "WeaponModelChanger";
-    public override string ModuleVersion => "2.0.3";
+    public override string ModuleVersion => "2.0.4";
     public override string ModuleAuthor => "56dz";
 
     public static Plugin Instance { get; set; } = new();
